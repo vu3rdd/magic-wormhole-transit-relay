@@ -1,12 +1,12 @@
 from collections import defaultdict
 
 import automat
+from binascii import unhexlify
 from twisted.python import log
 from zope.interface import (
     Interface,
     Attribute,
 )
-
 
 class ITransitClient(Interface):
     """
@@ -138,6 +138,7 @@ class PendingRequests(object):
                 self._active.register(new_tc, old_tc)
                 new_tc.got_partner(old_tc)
                 old_tc.got_partner(new_tc)
+                print("client1 talks {}, client2 talks {}".format(old_tc._client_type, new_tc._client_type))
                 return False
 
         potentials.add((new_side, new_tc))
@@ -163,6 +164,8 @@ class TransitServerState(object):
     _first = None
     _mood = "empty"
     _total_sent = 0
+    _client_type = "" # "tcp" or "websocket"
+    _packet_count = 0
 
     def __init__(self, pending_requests, usage_recorder):
         self._pending_requests = pending_requests
@@ -275,6 +278,20 @@ class TransitServerState(object):
         self._client.send(b"ok\n")
 
     @_machine.output()
+    def _start_gc_debug(self):
+        import tracemalloc
+        tracemalloc.start()
+
+    @_machine.output()
+    def _stop_gc_debug(self):
+        import tracemalloc
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+        print("[ Top 10 ]")
+        for stat in top_stats[:10]:
+            print(stat)
+
+    @_machine.output()
     def _send_impatient(self):
         self._client.send(b"impatient\n")
         if self._client.factory.log_requests:
@@ -283,6 +300,25 @@ class TransitServerState(object):
     @_machine.output()
     def _count_bytes(self, data):
         self._total_sent += len(data)
+
+    # @_machine.output()
+    # def _send_to_partner(self, data):
+    #     # two cases: Either self._client is talking websocket to relay
+    #     # and self._buddy._client is talking tcp or vice versa.
+    #     l = len(data)
+    #     lx = hexlify("%08x" % l)
+    #     if lx == data[0:4]: # encrypted records
+    #     if self._client_type == "websocket" and self._buddy._client_type == "tcp":
+    #         # add 4-byte length prefix
+    #         length = unhexlify("%08x" % len(data))
+    #         self._buddy._client.send(length)
+    #         self._buddy._client.send(data)
+    #     elif elf._client_type == "tcp" and self._buddy._client_type == "websocket":
+    #         # remove 4-byte length prefix
+    #         self._buddy._client.send(data[4:])
+    #     else:
+    #         # tcp to tcp or websocket to websocket
+    #         self._buddy._client.send(data)
 
     @_machine.output()
     def _send_to_partner(self, data):
@@ -433,7 +469,7 @@ class TransitServerState(object):
     wait_partner.upon(
         got_partner,
         enter=relaying,
-        outputs=[_mood_happy, _send_ok, _connect_partner],
+        outputs=[_mood_happy, _send_ok, _connect_partner, _start_gc_debug],
     )
     wait_partner.upon(
         connection_lost,
@@ -459,7 +495,7 @@ class TransitServerState(object):
     relaying.upon(
         connection_lost,
         enter=done,
-        outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage],
+        outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage, _stop_gc_debug],
     )
 
     done.upon(
