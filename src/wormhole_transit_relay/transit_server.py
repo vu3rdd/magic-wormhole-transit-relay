@@ -24,7 +24,6 @@ from zope.interface import implementer
 @implementer(ITransitClient)
 class TransitConnection(LineReceiver):
     delimiter = b'\n'
-    _packet_count = 0
     _last_buffer = bytes([])
     _last_length = 0
     # maximum length of a line we will accept before the handshake is complete.
@@ -112,17 +111,14 @@ class TransitConnection(LineReceiver):
         # practice, this buffers about 10MB per connection, after which
         # point the sender will only transmit data as fast as the
         # receiver can handle it.
-        self._packet_count += 1
         # detect TCP sender
         sender_handshake = re.search(br"^transit sender (\w{64}) ready\n\n", data)
         if sender_handshake:
-            print("handshake: {}".format(data))
             self._state.got_bytes(data)
             return
 
         sender_go = re.search(br"^go\n", data)
         if sender_go:
-            print("go: {}".format(data))
             self._state.got_bytes(data)
             return
 
@@ -130,34 +126,18 @@ class TransitConnection(LineReceiver):
         self._last_buffer += data
 
         length = int(hexlify(self._last_buffer[0:4]), 16)
-        print("enc record len: {}, payload len: {}".format(length, len(self._last_buffer)))
-        if len(self._last_buffer) == length + 4:
-            print("sending...3")
-            self._state.got_bytes(data)
-        else: # either length of the payload is bigger or smaller
-            if len(self._last_buffer) >= length:
-                pCount = 0
-                while len(self._last_buffer) > 4:
-                    # split payload into length sized packets.
-                    length = int(hexlify(self._last_buffer[0:4]), 16)
-                    print("{}: length of record: {}".format(pCount, length))
-                    payload = self._last_buffer[0:length+4] # one packet (or smaller)
-                    self._last_buffer = self._last_buffer[length+4:]
-                    # print("{}: length of tcp data payload: {}".format(pCount, len(data)))
-                    if len(payload) < (length + 4):
-                        self._last_buffer += payload
-                        self._last_length = length
-                        print("{}: saving into buffer.. len(_buffer): {}".format(pCount, len(self._last_buffer)))
-                        return
-                    else:
-                        print("{}: len: {}, split payload len: {}, len of last_buffer: {}".format(pCount, length, len(payload), len(self._last_buffer)))
-                        print("sending...4")
-                        self._state.got_bytes(payload)
-                    pCount += 1
-            else:
-                # len(data) < length + 4. we should buffer this data
-                # until we get the frame boundary
-                print("haven't got enough bytes yet")
+        if len(self._last_buffer) >= length:
+            while len(self._last_buffer) > 4:
+                # split payload into length sized packets.
+                length = int(hexlify(self._last_buffer[0:4]), 16)
+                payload = self._last_buffer[0:length+4] # one packet (or smaller)
+                self._last_buffer = self._last_buffer[length+4:]
+                if len(payload) < (length + 4):
+                    self._last_buffer += payload
+                    self._last_length = length
+                    return
+                else:
+                    self._state.got_bytes(payload)
 
     def connectionLost(self, reason):
         self._state.connection_lost()
@@ -305,8 +285,6 @@ class WebSocketTransitConnection(WebSocketServerProtocol):
             if token is None:
                 self._state.bad_token()
         else:
-            length = payload[0:4]
-            print("enc record len: {}, payload len: {}".format(length, len(payload)))
             self._state.got_bytes(payload)
 
     def onClose(self, wasClean, code, reason):
