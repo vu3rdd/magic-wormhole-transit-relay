@@ -278,20 +278,6 @@ class TransitServerState(object):
         self._client.send(b"ok\n")
 
     @_machine.output()
-    def _start_gc_debug(self):
-        import tracemalloc
-        tracemalloc.start()
-
-    @_machine.output()
-    def _stop_gc_debug(self):
-        import tracemalloc
-        snapshot = tracemalloc.take_snapshot()
-        top_stats = snapshot.statistics('lineno')
-        print("[ Top 10 ]")
-        for stat in top_stats[:10]:
-            print(stat)
-
-    @_machine.output()
     def _send_impatient(self):
         self._client.send(b"impatient\n")
         if self._client.factory.log_requests:
@@ -469,7 +455,7 @@ class TransitServerState(object):
     wait_partner.upon(
         got_partner,
         enter=relaying,
-        outputs=[_mood_happy, _send_ok, _connect_partner, _start_gc_debug],
+        outputs=[_mood_happy, _send_ok, _connect_partner],
     )
     wait_partner.upon(
         connection_lost,
@@ -495,7 +481,7 @@ class TransitServerState(object):
     relaying.upon(
         connection_lost,
         enter=done,
-        outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage, _stop_gc_debug],
+        outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage],
     )
 
     done.upon(
