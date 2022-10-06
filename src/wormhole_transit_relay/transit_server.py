@@ -25,7 +25,6 @@ from zope.interface import implementer
 class TransitConnection(LineReceiver):
     delimiter = b'\n'
     _last_buffer = bytes([])
-    _last_length = 0
     # maximum length of a line we will accept before the handshake is complete.
     # This must be >= to the longest possible handshake message.
 
@@ -141,7 +140,6 @@ class TransitConnection(LineReceiver):
                 self._last_buffer = self._last_buffer[length+4:]
                 if len(payload) < (length + 4):
                     self._last_buffer += payload
-                    self._last_length = length
                     return
                 else:
                     self._state.got_bytes(payload)
