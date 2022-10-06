@@ -111,7 +111,13 @@ class TransitConnection(LineReceiver):
         # practice, this buffers about 10MB per connection, after which
         # point the sender will only transmit data as fast as the
         # receiver can handle it.
-        # detect TCP sender
+
+        if self._buddy._client_type == "tcp":
+            # relay the bytes
+            self._state.got_bytes(data)
+            return
+
+        # tcp sender, websocket receiver
         sender_handshake = re.search(br"^transit sender (\w{64}) ready\n\n", data)
         if sender_handshake:
             self._state.got_bytes(data)
@@ -122,7 +128,6 @@ class TransitConnection(LineReceiver):
             self._state.got_bytes(data)
             return
 
-        # if len(self._last_buffer) is not 0:
         self._last_buffer += data
 
         length = int(hexlify(self._last_buffer[0:4]), 16)
@@ -130,6 +135,8 @@ class TransitConnection(LineReceiver):
             while len(self._last_buffer) > 4:
                 # split payload into length sized packets.
                 length = int(hexlify(self._last_buffer[0:4]), 16)
+                # XXX: once the client is fixed, do not send length
+                # prefix
                 payload = self._last_buffer[0:length+4] # one packet (or smaller)
                 self._last_buffer = self._last_buffer[length+4:]
                 if len(payload) < (length + 4):
@@ -285,6 +292,12 @@ class WebSocketTransitConnection(WebSocketServerProtocol):
             if token is None:
                 self._state.bad_token()
         else:
+            # websocket payload won't have length field, that has to
+            # be extracted via an api to websocket library and
+            # prefixed to the packet in case the buddy is a tcp
+            # connection. Also, in such a case, the initial handshake
+            # messages which are not length prefixed, needs to be sent
+            # as is.
             self._state.got_bytes(payload)
 
     def onClose(self, wasClean, code, reason):

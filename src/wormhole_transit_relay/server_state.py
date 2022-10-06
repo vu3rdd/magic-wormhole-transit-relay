@@ -287,25 +287,6 @@ class TransitServerState(object):
     def _count_bytes(self, data):
         self._total_sent += len(data)
 
-    # @_machine.output()
-    # def _send_to_partner(self, data):
-    #     # two cases: Either self._client is talking websocket to relay
-    #     # and self._buddy._client is talking tcp or vice versa.
-    #     l = len(data)
-    #     lx = hexlify("%08x" % l)
-    #     if lx == data[0:4]: # encrypted records
-    #     if self._client_type == "websocket" and self._buddy._client_type == "tcp":
-    #         # add 4-byte length prefix
-    #         length = unhexlify("%08x" % len(data))
-    #         self._buddy._client.send(length)
-    #         self._buddy._client.send(data)
-    #     elif elf._client_type == "tcp" and self._buddy._client_type == "websocket":
-    #         # remove 4-byte length prefix
-    #         self._buddy._client.send(data[4:])
-    #     else:
-    #         # tcp to tcp or websocket to websocket
-    #         self._buddy._client.send(data)
-
     @_machine.output()
     def _send_to_partner(self, data):
         self._buddy._client.send(data)
