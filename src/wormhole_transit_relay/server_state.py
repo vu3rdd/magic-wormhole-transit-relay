@@ -329,7 +329,6 @@ class TransitServerState(object):
             self._last_buffer = self._last_buffer[len(data):]
             return
 
-        # self._last_buffer += data
         from binascii import hexlify
         bufsize = len(self._last_buffer)
 
@@ -340,17 +339,14 @@ class TransitServerState(object):
                     # split payload into length sized packets.
                     length = int(hexlify(self._last_buffer[0:4]), 16)
 
-                    # XXX: once the client is fixed, do not send
-                    # length prefix
-
                     # one packet (or smaller)
-                    payload = self._last_buffer[4:length+4]
+                    payload = self._last_buffer[0:length+4]
                     self._last_buffer = self._last_buffer[length+4:]
                     if len(payload) < (length + 4):
                         self._last_buffer += payload
                         return
                     else:
-                        self._buddy._client.send(payload)
+                        self._buddy._client.send(payload[4:])
 
     @_machine.output()
     def _send_to_partner(self, data):
