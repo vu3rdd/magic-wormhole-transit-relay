@@ -110,39 +110,7 @@ class TransitConnection(LineReceiver):
         # practice, this buffers about 10MB per connection, after which
         # point the sender will only transmit data as fast as the
         # receiver can handle it.
-
-        if self._buddy._client_type == "tcp":
-            # relay the bytes
-            self._state.got_bytes(data)
-            return
-
-        # tcp sender, websocket receiver
-        sender_handshake = re.search(br"^transit sender (\w{64}) ready\n\n", data)
-        if sender_handshake:
-            self._state.got_bytes(data)
-            return
-
-        sender_go = re.search(br"^go\n", data)
-        if sender_go:
-            self._state.got_bytes(data)
-            return
-
-        self._last_buffer += data
-
-        length = int(hexlify(self._last_buffer[0:4]), 16)
-        if len(self._last_buffer) >= length:
-            while len(self._last_buffer) > 4:
-                # split payload into length sized packets.
-                length = int(hexlify(self._last_buffer[0:4]), 16)
-                # XXX: once the client is fixed, do not send length
-                # prefix
-                payload = self._last_buffer[0:length+4] # one packet (or smaller)
-                self._last_buffer = self._last_buffer[length+4:]
-                if len(payload) < (length + 4):
-                    self._last_buffer += payload
-                    return
-                else:
-                    self._state.got_bytes(payload)
+        self._state.got_bytes(data)
 
     def connectionLost(self, reason):
         self._state.connection_lost()

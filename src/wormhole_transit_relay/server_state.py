@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+import re
 import automat
 from binascii import unhexlify
 from twisted.python import log
@@ -136,9 +137,13 @@ class PendingRequests(object):
 
                 # glue the two ends together
                 self._active.register(new_tc, old_tc)
-                new_tc.got_partner(old_tc)
-                old_tc.got_partner(new_tc)
-                print("client1 talks {}, client2 talks {}".format(old_tc._client_type, new_tc._client_type))
+                if old_tc._client_type == new_tc._client_type:
+                    new_tc.got_partner(old_tc)
+                    old_tc.got_partner(new_tc)
+                else:
+                    new_tc.got_partner_translate(old_tc)
+                    old_tc.got_partner_translate(new_tc)
+
                 return False
 
         potentials.add((new_side, new_tc))
@@ -166,6 +171,7 @@ class TransitServerState(object):
     _total_sent = 0
     _client_type = "" # "tcp" or "websocket"
     _packet_count = 0
+    _last_buffer = bytes([])
 
     def __init__(self, pending_requests, usage_recorder):
         self._pending_requests = pending_requests
@@ -223,6 +229,12 @@ class TransitServerState(object):
     def got_partner(self, client):
         """
         The partner for this relay session has been found
+        """
+
+    @_machine.input()
+    def got_partner_translate(self, client):
+        """
+        The partner for this relay session has been found (but it needs translation)
         """
 
     @_machine.input()
@@ -286,6 +298,59 @@ class TransitServerState(object):
     @_machine.output()
     def _count_bytes(self, data):
         self._total_sent += len(data)
+
+    @_machine.output()
+    def _buffer_bytes(self, data):
+        self._last_buffer += data
+
+    @_machine.output()
+    def _maybe_send_to_partner(self, data):
+        # if we have > 4 bytes:
+        #   convert to length
+        # if we have >= length bytes:
+        #   send websocket message
+        # print("{}".format(data))
+
+        sender_handshake = re.search(br"^transit sender (\w{64}) ready\n\n", data)
+        if sender_handshake:
+            self._buddy._client.send(data)
+            self._last_buffer = self._last_buffer[len(data):]
+            return
+
+        receiver_handshake = re.search(br"^transit receiver (\w{64}) ready\n\n", data)
+        if receiver_handshake:
+            self._buddy._client.send(data)
+            self._last_buffer = self._last_buffer[len(data):]
+            return
+
+        sender_go = re.search(br"^go\n", data)
+        if sender_go:
+            self._buddy._client.send(data)
+            self._last_buffer = self._last_buffer[len(data):]
+            return
+
+        # self._last_buffer += data
+        from binascii import hexlify
+        bufsize = len(self._last_buffer)
+
+        if bufsize >= 4:
+            length = int(hexlify(self._last_buffer[0:4]), 16)
+            if bufsize >= length+4:
+                while len(self._last_buffer) > 4:
+                    # split payload into length sized packets.
+                    length = int(hexlify(self._last_buffer[0:4]), 16)
+
+                    # XXX: once the client is fixed, do not send
+                    # length prefix
+
+                    # one packet (or smaller)
+                    payload = self._last_buffer[4:length+4]
+                    self._last_buffer = self._last_buffer[length+4:]
+                    if len(payload) < (length + 4):
+                        self._last_buffer += payload
+                        return
+                    else:
+                        self._buddy._client.send(payload)
 
     @_machine.output()
     def _send_to_partner(self, data):
@@ -391,6 +456,12 @@ class TransitServerState(object):
         """
 
     @_machine.state()
+    def translating(self):
+        """
+        Translating TCP messages into WebSocket
+        """
+
+    @_machine.state()
     def done(self):
         """
         Terminal state
@@ -459,7 +530,24 @@ class TransitServerState(object):
         enter=relaying,
         outputs=[_count_bytes, _send_to_partner],
     )
+    wait_partner.upon(
+        got_partner_translate,
+        enter=translating,
+        outputs=[_mood_happy, _send_ok, _connect_partner],
+    )
     relaying.upon(
+        connection_lost,
+        enter=done,
+        outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage],
+    )
+
+    translating.upon(
+        got_bytes,
+        enter=translating,
+        outputs=[_count_bytes, _buffer_bytes, _maybe_send_to_partner],
+    )
+
+    translating.upon(
         connection_lost,
         enter=done,
         outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage],
