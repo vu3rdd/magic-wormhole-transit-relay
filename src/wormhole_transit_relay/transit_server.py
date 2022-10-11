@@ -31,7 +31,17 @@ class TransitConnection(LineReceiver):
     MAX_LENGTH = 1024
     started_time = None
 
+    # XXX naming is hard .. maybe these are "send_message" and
+    # "send_raw" or something?
+
     def send(self, data):
+        """
+        ITransitClient API
+        """
+        # XXX do length-prefix
+        self.transport.write(data)
+
+    def send_handshake(self, data):
         """
         ITransitClient API
         """
@@ -185,6 +195,12 @@ class WebSocketTransitConnection(WebSocketServerProtocol):
     started_time = None
 
     def send(self, data):
+        """
+        ITransitClient API
+        """
+        self.sendMessage(data, isBinary=True)
+
+    def send_handshake(self, data):
         """
         ITransitClient API
         """

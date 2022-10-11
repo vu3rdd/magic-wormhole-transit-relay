@@ -19,7 +19,14 @@ class ITransitClient(Interface):
 
     def send(data):
         """
-        Send some byets to the client
+        Send a message to the client (length-prefixed for TCP
+        connections).
+        """
+
+    def send_handshake(data):
+        """
+        Send a message to the client without length-prefix (during
+        'handshake' phase)
         """
 
     def disconnect():
@@ -255,6 +262,18 @@ class TransitServerState(object):
         Some bytes have arrived (that aren't part of the handshake)
         """
 
+    @_machine.input()
+    def got_handshake(self, data):
+        """
+        An entire handshake message has been received
+        """
+
+    @_machine.input()
+    def got_go(self, data):
+        """
+        We saw the 'go\n' message from the other side
+        """
+
     @_machine.output()
     def _remember_client(self, client):
         self._client = client
@@ -281,17 +300,17 @@ class TransitServerState(object):
     @_machine.output()
     def _send_bad(self):
         self._mood = "errory"
-        self._client.send(b"bad handshake\n")
+        self._client.send_handshake(b"bad handshake\n")
         if self._client.factory.log_requests:
             log.msg("transit handshake failure")
 
     @_machine.output()
     def _send_ok(self):
-        self._client.send(b"ok\n")
+        self._client.send_handshake(b"ok\n")
 
     @_machine.output()
     def _send_impatient(self):
-        self._client.send(b"impatient\n")
+        self._client.send_handshake(b"impatient\n")
         if self._client.factory.log_requests:
             log.msg("transit impatience failure")
 
@@ -304,6 +323,28 @@ class TransitServerState(object):
         self._last_buffer += data
 
     @_machine.output()
+    def _find_handshake(self, data):
+        idx = self._last_buffer.search(b"\n\n")
+        if idx > 0:
+            msg = self._last_buffer[:idx+2]
+            self._last_buffer = self._last_buffer[idx+2:]
+            self._buddy._client.send_handshake(msg)
+            self.got_handshake(b"")
+
+    @_machine.output()
+    def _find_go_handshake(self, data):
+        idx = self._last_buffer.search(b"\n")
+        if idx > 0:
+            msg = self._last_buffer[:idx+1]
+            self._last_buffer = self._last_buffer[idx+1:]
+            self._buddy._client.send_handshake(msg)
+            self.got_go(b"")  # xxx don't need buffer etc in transition
+
+    @_machine.output()
+    def _find_go_handshake(self, data):
+        pass
+
+    @_machine.output()
     def _maybe_send_to_partner(self, data):
         # if we have > 4 bytes:
         #   convert to length
@@ -313,19 +354,19 @@ class TransitServerState(object):
 
         sender_handshake = re.search(br"^transit sender (\w{64}) ready\n\n", data)
         if sender_handshake:
-            self._buddy._client.send(data)
+            self._buddy._client.send_handshake(data)
             self._last_buffer = self._last_buffer[len(data):]
             return
 
         receiver_handshake = re.search(br"^transit receiver (\w{64}) ready\n\n", data)
         if receiver_handshake:
-            self._buddy._client.send(data)
+            self._buddy._client.send_handshake(data)
             self._last_buffer = self._last_buffer[len(data):]
             return
 
         sender_go = re.search(br"^go\n", data)
         if sender_go:
-            self._buddy._client.send(data)
+            self._buddy._client.send_handshake(data)
             self._last_buffer = self._last_buffer[len(data):]
             return
 
@@ -337,8 +378,8 @@ class TransitServerState(object):
             l = len(data)
             if l > 0:
                 length = unhexlify("%08x" % len(data))
-                self._buddy._client.send(length)
-                self._buddy._client.send(data)
+                self._buddy._client.send_handshake(length)
+                self._buddy._client.send_handshake(data)
             return
 
         # handle tcp -> ws translation
@@ -358,7 +399,7 @@ class TransitServerState(object):
                         self._last_buffer += payload
                         return
                     else:
-                        self._buddy._client.send(payload[4:])
+                        self._buddy._client.send_handshake(payload[4:])
 
     @_machine.output()
     def _send_to_partner(self, data):
@@ -458,6 +499,18 @@ class TransitServerState(object):
         """
 
     @_machine.state()
+    def wait_handshake(self):
+        """
+        Waiting for our partner's handshake message
+        """
+
+    @_machine.state()
+    def wait_go_handshake(self):
+        """
+        Wait for acknowledge of our handshake
+        """
+
+    @_machine.state()
     def relaying(self):
         """
         Relaying bytes to our partner
@@ -514,7 +567,7 @@ class TransitServerState(object):
 
     wait_partner.upon(
         got_partner,
-        enter=relaying,
+        enter=wait_handshake,
         outputs=[_mood_happy, _send_ok, _connect_partner],
     )
     wait_partner.upon(
@@ -540,13 +593,30 @@ class TransitServerState(object):
     )
     wait_partner.upon(
         got_partner_translate,
-        enter=translating,
+        enter=wait_handshake, # XXX split this too?? ug
         outputs=[_mood_happy, _send_ok, _connect_partner],
     )
     relaying.upon(
         connection_lost,
         enter=done,
         outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage],
+    )
+
+    wait_handshake.upon(
+        got_bytes,
+        enter=wait_handshake,
+        outputs=[_count_bytes, _buffer_bytes, _find_handshake],
+    )
+    wait_handshake.upon(
+        got_handshake,
+        enter=wait_go_handshake,
+        outputs=[_find_go_handshake],
+    )
+
+    wait_go_handshake.upon(
+        got_go,
+        enter=translating,  # XXX no way to get to 'relaying' ...
+        outputs=[_maybe_send_to_partner],
     )
 
     translating.upon(
