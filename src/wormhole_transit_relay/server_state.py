@@ -329,7 +329,19 @@ class TransitServerState(object):
             self._last_buffer = self._last_buffer[len(data):]
             return
 
-        from binascii import hexlify
+        from binascii import hexlify, unhexlify
+        # handle ws to tcp
+        # print("I speak {}, my buddy speaks {}".format(self._client_type, self._buddy._client_type))
+        if self._client_type == "websocket":
+            # create a length prefixed packet.
+            l = len(data)
+            if l > 0:
+                length = unhexlify("%08x" % len(data))
+                self._buddy._client.send(length)
+                self._buddy._client.send(data)
+            return
+
+        # handle tcp -> ws translation
         bufsize = len(self._last_buffer)
 
         if bufsize >= 4:
