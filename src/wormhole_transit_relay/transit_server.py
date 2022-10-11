@@ -38,7 +38,9 @@ class TransitConnection(LineReceiver):
         """
         ITransitClient API
         """
-        # XXX do length-prefix
+        length = unhexlify("%08x" % len(data))
+        assert type(length) == bytes # XXX remove
+        self.transport.write(length)
         self.transport.write(data)
 
     def send_handshake(self, data):
@@ -84,9 +86,9 @@ class TransitConnection(LineReceiver):
         self._state._client_type = "tcp"
 
         # uncomment to turn on state-machine tracing
-        # def tracer(oldstate, theinput, newstate):
-        #     print("TRACE: {}: {} --{}--> {}".format(id(self), oldstate, theinput, newstate))
-        # self._state.set_trace_function(tracer)
+        def tracer(oldstate, theinput, newstate):
+            print("TRACE: {}: {} --{}--> {}".format(id(self), oldstate, theinput, newstate))
+        self._state.set_trace_function(tracer)
 
     def lineReceived(self, line):
         """
@@ -242,9 +244,9 @@ class WebSocketTransitConnection(WebSocketServerProtocol):
         )
 
         # uncomment to turn on state-machine tracing
-        # def tracer(oldstate, theinput, newstate):
-        #    print("WSTRACE: {}: {} --{}--> {}".format(id(self), oldstate, theinput, newstate))
-        # self._state.set_trace_function(tracer)
+        def tracer(oldstate, theinput, newstate):
+           print("WSTRACE: {}: {} --{}--> {}".format(id(self), oldstate, theinput, newstate))
+        self._state.set_trace_function(tracer)
 
     def onOpen(self):
         self._state.connection_made(self)
@@ -282,7 +284,7 @@ class WebSocketTransitConnection(WebSocketServerProtocol):
             # connection. Also, in such a case, the initial handshake
             # messages which are not length prefixed, needs to be sent
             # as is.
-            self._state.got_bytes(payload)
+            self._state.got_message(payload)
 
     def onClose(self, wasClean, code, reason):
         """
