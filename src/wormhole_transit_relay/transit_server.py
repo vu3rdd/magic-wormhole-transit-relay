@@ -48,6 +48,7 @@ class TransitConnection(LineReceiver):
         ITransitClient API
         """
         self._buddy = other
+        self._buddy._client.transport.registerProducer(self.transport, True)
 
     def disconnect_partner(self):
         """
@@ -200,6 +201,7 @@ class WebSocketTransitConnection(WebSocketServerProtocol):
         ITransitClient API
         """
         self._buddy = other
+        self._buddy._client.transport.registerProducer(self.transport, True)
 
     def disconnect_partner(self):
         """
