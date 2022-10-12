@@ -586,6 +586,11 @@ class TransitServerState(object):
         outputs=[_mood_impatient, _send_impatient, _disconnect, _unregister, _record_usage],
     )
     wait_partner.upon(
+        got_message,
+        enter=done,
+        outputs=[_mood_impatient, _send_impatient, _disconnect, _unregister, _record_usage],
+    )
+    wait_partner.upon(
         partner_connection_lost,
         enter=done,
         outputs=[_mood_redundant, _disconnect, _record_usage],
