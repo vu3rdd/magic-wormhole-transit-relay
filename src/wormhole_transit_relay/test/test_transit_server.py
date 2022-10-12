@@ -173,7 +173,6 @@ class _Transit:
         s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
-        print(p2.get_received_data())
         self.assertEqual(p2.get_received_data(), s1)
 
         p1.disconnect()
