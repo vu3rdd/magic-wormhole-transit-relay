@@ -175,7 +175,7 @@ class _Transit:
         token1 = b"\x00"*32
         p1, p2 = self._paired_clients(token1)
 
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -190,7 +190,7 @@ class _Transit:
         p1, p2 = self._paired_clients(token1, side1=side1)
 
         # all data they sent after the handshake should be given to us
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -221,7 +221,7 @@ class _Transit:
         p1, p2 = self._paired_clients(token1, side1=side1, side2=side2)
 
         # all data they sent after the handshake should be given to us
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -492,37 +492,32 @@ class TransitWebSockets(_Transit, ServerBase, unittest.TestCase):
         self.flush()
         p2.send(handshake(token1, side=side2))
         self.flush()
-
-        # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
-
-        p1.reset_received_data()
-        p2.reset_received_data()
-
-        # fake the "second" handshake about the translate for now
-        # XXX -> probably want this more generally in "all" the tests?
-        sender_msg = "transit sender {} ready\n\n".format("1"*64).encode("utf8")
-        p1.send(sender_msg)
-        p2.send("transit receiver {} ready\n\n".format("1"*64).encode("utf8"))
-        self.flush()
+        p1.send(transit_handshake(token1, "sender"))
+        p2.send(transit_handshake(token1, "receiver"))
         p1.send(b"go\n")
         self.flush()
-        self.assertEqual(p2.get_received_data(), sender_msg + b"go\n")
 
-        # _now_ we're ready to really relay
+        # a correct handshake yields an ack, after which we can send
+        self.assertEqual(
+            p1.get_received_data(),
+            b"ok\n" + transit_handshake(token1, "receiver")
+        )
+        self.assertEqual(
+            p2.get_received_data(),
+            b"ok\n" + transit_handshake(token1, "sender") + b"go\n"
+        )
 
         p1.reset_received_data()
         p2.reset_received_data()
 
         # all data they sent after the handshake should be given to us
+        # (s1 is WebSocket so we _don't_ do length-prefix)
         s1 = b"data1"
         p1.send(s1)
         self.flush()
 
         # we are the TCP receiver so we _should_ see length prefix
-        self.assertEqual(p2.get_received_data(), b'\x00\x00\x00\x05' + s1)
+        self.assertEqual(p2.get_received_data(), _prefix_data(s1))
 
         p1.disconnect()
         p2.disconnect()
