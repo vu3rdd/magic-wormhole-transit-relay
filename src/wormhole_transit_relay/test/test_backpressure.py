@@ -1,3 +1,4 @@
+import re
 from io import (
     StringIO,
 )
@@ -76,18 +77,13 @@ class Sender(WebSocketClientProtocol):
         self.got_handshake = Deferred()
 
     def onMessage(self, payload, is_binary):
-        print("Sender got: {}".format(payload.decode("utf8")))
+        print("send: {}".format(len(payload)))
         if not self.got_ok.called:
             if payload == b"ok\n":
                 self.got_ok.callback(None)
         elif not self.got_handshake.called:
-            import re
             if re.match(br"transit receiver (\w{64}) ready\n\n", payload):
                 self.got_handshake.callback(None)
-            else:
-                print("bad", payload)
-        else:
-            print("hrmmm", payload)
 
     def onClose(self, clean, code, reason):
         print(f"close: {clean} {code} {reason}")
@@ -106,7 +102,7 @@ class Receiver(WebSocketClientProtocol):
         self.received = 0
 
     def onMessage(self, payload, is_binary):
-        print("Receiver got: {}".format(payload.decode("utf8")))
+        print("recv: {}".format(len(payload)))
         if payload == b"go\n":
             self.got_go.callback(None)
         else:
@@ -159,16 +155,13 @@ class TransitWebSockets(unittest.TestCase):
         side_b.sendMessage(handshake(b"a"*32, b"b"*8), True)
 
         yield side_a.got_ok
-        print("got ok")
 
         side_a.sendMessage(transit_handshake(b"x"*32, "sender"), True)
         side_b.sendMessage(transit_handshake(b"x"*32, "receiver"), True)
         yield side_a.got_handshake
         side_a.sendMessage(b"go\n", True)
 
-        print("sent other shake")
         yield side_b.got_go
-        print("got go")
 
 
         # remove side_b's filedescriptor from the reactor .. this
