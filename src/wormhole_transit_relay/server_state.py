@@ -699,4 +699,4 @@ class TransitServerState(object):
     )
 
     # uncomment to turn on state-machine tracing
-    set_trace_function = _machine._setTrace
+    # set_trace_function = _machine._setTrace
