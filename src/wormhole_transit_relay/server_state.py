@@ -144,12 +144,8 @@ class PendingRequests(object):
 
                 # glue the two ends together
                 self._active.register(new_tc, old_tc)
-                if old_tc._client_type == new_tc._client_type:
-                    new_tc.got_partner(old_tc)
-                    old_tc.got_partner(new_tc)
-                else:
-                    new_tc.got_partner_translate(old_tc)
-                    old_tc.got_partner_translate(new_tc)
+                new_tc.got_partner(old_tc)
+                old_tc.got_partner(new_tc)
 
                 return False
 
@@ -241,12 +237,6 @@ class TransitServerState(object):
     def got_partner(self, client):
         """
         The partner for this relay session has been found
-        """
-
-    @_machine.input()
-    def got_partner_translate(self, client):
-        """
-        The partner for this relay session has been found (but it needs translation)
         """
 
     @_machine.input()
