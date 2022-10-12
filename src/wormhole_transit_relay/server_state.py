@@ -523,12 +523,6 @@ class TransitServerState(object):
         """
 
     @_machine.state()
-    def relaying(self):
-        """
-        Relaying bytes to our partner
-        """
-
-    @_machine.state()
     def translating(self):
         """
         Translating TCP messages into WebSocket
@@ -601,17 +595,6 @@ class TransitServerState(object):
         partner_connection_lost,
         enter=done,
         outputs=[_mood_redundant, _disconnect, _record_usage],
-    )
-
-    relaying.upon(
-        got_bytes,
-        enter=relaying,
-        outputs=[_count_bytes, _send_to_partner],
-    )
-    relaying.upon(
-        connection_lost,
-        enter=done,
-        outputs=[_mood_happy_if_first, _disconnect_partner, _unregister, _record_usage],
     )
 
     wait_handshake.upon(
