@@ -1,3 +1,4 @@
+import re
 from io import (
     StringIO,
 )
@@ -73,13 +74,16 @@ class Sender(WebSocketClientProtocol):
         WebSocketClientProtocol.__init__(self, *args, **kw)
         self.done = Deferred()
         self.got_ok = Deferred()
+        self.got_handshake = Deferred()
 
     def onMessage(self, payload, is_binary):
-        print("onMessage")
+        print("send: {}".format(len(payload)))
         if not self.got_ok.called:
             if payload == b"ok\n":
                 self.got_ok.callback(None)
-        print("send: {}".format(payload.decode("utf8")))
+        elif not self.got_handshake.called:
+            if re.match(br"transit receiver (\w{64}) ready\n\n", payload):
+                self.got_handshake.callback(None)
 
     def onClose(self, clean, code, reason):
         print(f"close: {clean} {code} {reason}")
@@ -93,18 +97,28 @@ class Receiver(WebSocketClientProtocol):
     def __init__(self, *args, **kw):
         WebSocketClientProtocol.__init__(self, *args, **kw)
         self.done = Deferred()
+        self.got_go = Deferred()
         self.first_message = Deferred()
         self.received = 0
 
     def onMessage(self, payload, is_binary):
         print("recv: {}".format(len(payload)))
-        self.received += len(payload)
-        if not self.first_message.called:
-            self.first_message.callback(None)
+        if payload == b"go\n":
+            self.got_go.callback(None)
+        else:
+            self.received += len(payload)
+            if not self.first_message.called:
+                self.first_message.callback(None)
 
     def onClose(self, clean, code, reason):
         print(f"close: {clean} {code} {reason}")
         self.done.callback(None)
+
+
+from .common import (
+    handshake,
+    transit_handshake,
+)
 
 
 class TransitWebSockets(unittest.TestCase):
@@ -137,11 +151,18 @@ class TransitWebSockets(unittest.TestCase):
         side_a = yield agent.open("ws://localhost:8088", {}, lambda: Sender())
         side_b = yield agent.open("ws://localhost:8088", {}, lambda: Receiver())
 
-        side_a.sendMessage(b"please relay aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa for side aaaaaaaaaaaaaaaa", True)
-        side_b.sendMessage(b"please relay aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa for side bbbbbbbbbbbbbbbb", True)
+        side_a.sendMessage(handshake(b"a"*32, b"a"*8), True)
+        side_b.sendMessage(handshake(b"a"*32, b"b"*8), True)
 
         yield side_a.got_ok
-        yield side_b.first_message
+
+        side_a.sendMessage(transit_handshake(b"x"*32, "sender"), True)
+        side_b.sendMessage(transit_handshake(b"x"*32, "receiver"), True)
+        yield side_a.got_handshake
+        side_a.sendMessage(b"go\n", True)
+
+        yield side_b.got_go
+
 
         # remove side_b's filedescriptor from the reactor .. this
         # means it will not read any more data

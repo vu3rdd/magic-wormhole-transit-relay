@@ -1,4 +1,4 @@
-from binascii import hexlify
+from binascii import hexlify, unhexlify
 from twisted.trial import unittest
 from twisted.test import iosim
 from autobahn.twisted.websocket import (
@@ -25,13 +25,49 @@ from ..transit_server import (
     TransitServerState,
 )
 
+from .common import (
+    handshake,
+    transit_handshake,
+)
 
-def handshake(token, side=None):
-    hs = b"please relay " + hexlify(token)
-    if side is not None:
-        hs += b" for side " + hexlify(side)
-    hs += b"\n"
-    return hs
+def _paired_clients(testcase, token, side1=None, side2=None):
+    """
+    Produce two client protocols and successfully pair then, getting
+    to the 'ready for bulk data transfer' stage.
+    """
+    p1 = testcase.new_protocol()
+    p2 = testcase.new_protocol()
+    p1.send(handshake(token, side=side1))
+    testcase.flush()
+    p2.send(handshake(token, side=side2))
+    testcase.flush()
+    p1.send(transit_handshake(token, "sender"))
+    p2.send(transit_handshake(token, "receiver"))
+    p1.send(b"go\n")
+    testcase.flush()
+
+    # a correct handshake yields an ack, after which we can send
+    testcase.assertEqual(
+        p1.get_received_data(),
+        b"ok\n" + transit_handshake(token, "receiver")
+    )
+    testcase.assertEqual(
+        p2.get_received_data(),
+        b"ok\n" + transit_handshake(token, "sender") + b"go\n"
+    )
+
+    p1.reset_received_data()
+    p2.reset_received_data()
+    return p1, p2
+
+
+def _prefix_data(data):
+    """
+    Put on a 4-byte length prefix for the given data
+    """
+    length = unhexlify("%08x" % len(data))
+    return length + data
+
 
 class _Transit:
     def count(self):
@@ -75,25 +111,37 @@ class _Transit:
         # the token should be removed too
         self.assertEqual(len(self._transit_server.pending_requests._requests), 0)
 
-    def test_both_unsided(self):
+    def _paired_clients(self, token, side1=None, side2=None):
         p1 = self.new_protocol()
         p2 = self.new_protocol()
-
-        token1 = b"\x00"*32
-        p1.send(handshake(token1, side=None))
+        p1.send(handshake(token, side=side1))
         self.flush()
-        p2.send(handshake(token1, side=None))
+        p2.send(handshake(token, side=side2))
+        self.flush()
+        p1.send(transit_handshake(token, "sender"))
+        p2.send(transit_handshake(token, "receiver"))
+        p1.send(b"go\n")
         self.flush()
 
         # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
+        self.assertEqual(
+            p1.get_received_data(),
+            b"ok\n" + transit_handshake(token, "receiver")
+        )
+        self.assertEqual(
+            p2.get_received_data(),
+            b"ok\n" + transit_handshake(token, "sender") + b"go\n"
+        )
 
         p1.reset_received_data()
         p2.reset_received_data()
+        return p1, p2
 
-        s1 = b"data1"
+    def test_both_unsided(self):
+        token1 = b"\x00"*32
+        p1, p2 = self._paired_clients(token1)
+
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -102,26 +150,13 @@ class _Transit:
         self.flush()
 
     def test_sided_unsided(self):
-        p1 = self.new_protocol()
-        p2 = self.new_protocol()
 
         token1 = b"\x00"*32
         side1 = b"\x01"*8
-        p1.send(handshake(token1, side=side1))
-        self.flush()
-        p2.send(handshake(token1, side=None))
-        self.flush()
-
-        # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
-
-        p1.reset_received_data()
-        p2.reset_received_data()
+        p1, p2 = self._paired_clients(token1, side1=side1)
 
         # all data they sent after the handshake should be given to us
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -130,25 +165,12 @@ class _Transit:
         self.flush()
 
     def test_unsided_sided(self):
-        p1 = self.new_protocol()
-        p2 = self.new_protocol()
-
         token1 = b"\x00"*32
         side1 = b"\x01"*8
-        p1.send(handshake(token1, side=None))
-        p2.send(handshake(token1, side=side1))
-        self.flush()
-
-        # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
-
-        p1.reset_received_data()
-        p2.reset_received_data()
+        p1, p2 = _paired_clients(self, token1, side1)
 
         # all data they sent after the handshake should be given to us
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -157,27 +179,14 @@ class _Transit:
         p2.disconnect()
 
     def test_both_sided(self):
-        p1 = self.new_protocol()
-        p2 = self.new_protocol()
-
         token1 = b"\x00"*32
         side1 = b"\x01"*8
         side2 = b"\x02"*8
-        p1.send(handshake(token1, side=side1))
-        self.flush()
-        p2.send(handshake(token1, side=side2))
-        self.flush()
 
-        # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
-
-        p1.reset_received_data()
-        p2.reset_received_data()
+        p1, p2 = self._paired_clients(token1, side1=side1, side2=side2)
 
         # all data they sent after the handshake should be given to us
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
         self.assertEqual(p2.get_received_data(), s1)
@@ -448,37 +457,32 @@ class TransitWebSockets(_Transit, ServerBase, unittest.TestCase):
         self.flush()
         p2.send(handshake(token1, side=side2))
         self.flush()
-
-        # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
-
-        p1.reset_received_data()
-        p2.reset_received_data()
-
-        # fake the "second" handshake about the translate for now
-        # XXX -> probably want this more generally in "all" the tests?
-        sender_msg = "transit sender {} ready\n\n".format("1"*64).encode("utf8")
-        p1.send(sender_msg)
-        p2.send("transit receiver {} ready\n\n".format("1"*64).encode("utf8"))
-        self.flush()
+        p1.send(transit_handshake(token1, "sender"))
+        p2.send(transit_handshake(token1, "receiver"))
         p1.send(b"go\n")
         self.flush()
-        self.assertEqual(p2.get_received_data(), sender_msg + b"go\n")
 
-        # _now_ we're ready to really relay
+        # a correct handshake yields an ack, after which we can send
+        self.assertEqual(
+            p1.get_received_data(),
+            b"ok\n" + transit_handshake(token1, "receiver")
+        )
+        self.assertEqual(
+            p2.get_received_data(),
+            b"ok\n" + transit_handshake(token1, "sender") + b"go\n"
+        )
 
         p1.reset_received_data()
         p2.reset_received_data()
 
         # all data they sent after the handshake should be given to us
+        # (s1 is WebSocket so we _don't_ do length-prefix)
         s1 = b"data1"
         p1.send(s1)
         self.flush()
 
         # we are the TCP receiver so we _should_ see length prefix
-        self.assertEqual(p2.get_received_data(), b'\x00\x00\x00\x05' + s1)
+        self.assertEqual(p2.get_received_data(), _prefix_data(s1))
 
         p1.disconnect()
         p2.disconnect()
@@ -502,6 +506,13 @@ class TransitWebSockets(_Transit, ServerBase, unittest.TestCase):
         p1.send(handshake(token))
         p2.send(handshake(token))
         self.flush()
+        p1.send(transit_handshake(token, "sender"))
+        p2.send(transit_handshake(token, "receiver"))
+        p1.send(b"go\n")
+        self.flush()
+
+        # XXX need a test like this but _without_ the proper setup,
+        # too
 
         # p2 loses connection, then p1 sends a message
         p2.transport.loseConnection()
@@ -579,16 +590,10 @@ class Usage(ServerBase, unittest.TestCase):
         self.assertIdentical(self._usage.events[0]["waiting_time"], None)
 
     def test_one_happy_one_jilted(self):
-        p1 = self.new_protocol()
-        p2 = self.new_protocol()
-
         token1 = b"\x00"*32
         side1 = b"\x01"*8
         side2 = b"\x02"*8
-        p1.send(handshake(token1, side=side1))
-        self.flush()
-        p2.send(handshake(token1, side=side2))
-        self.flush()
+        p1, p2 = _paired_clients(self, token1, side1, side2)
 
         self.assertEqual(self._usage.events, []) # no events yet
 
