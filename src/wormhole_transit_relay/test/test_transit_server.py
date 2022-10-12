@@ -27,11 +27,42 @@ from ..transit_server import (
 
 
 def handshake(token, side=None):
+    """
+    :returns bytes: data comprising the 'relay' portion of the
+        handshake, with or without the side.
+    """
     hs = b"please relay " + hexlify(token)
     if side is not None:
         hs += b" for side " + hexlify(side)
     hs += b"\n"
     return hs
+
+
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+
+
+def transit_handshake(key, role):
+    """
+    :returns bytes: data for the 'transit' portion of the handshake
+        with one part of the key exchange
+    """
+    if role not in ("sender", "receiver"):
+        raise ValueError("Unknown role '{}'".format(role))
+    token = HKDF(
+        algorithm=hashes.SHA512(),
+        length=32,
+        salt=None,
+        info=b"transit_receiver",
+    ).derive(
+        key,
+    )
+
+    return "transit {} {} ready\n\n".format(
+        role,
+        hexlify(token).decode("ascii"),
+    ).encode("utf8")
+
 
 class _Transit:
     def count(self):
