@@ -550,7 +550,7 @@ class TransitServerState(object):
     wait_relay.upon(
         got_bytes,
         enter=done,
-        outputs=[_count_bytes, _mood_errory, _disconnect, _record_usage],
+        outputs=[_mood_errory, _disconnect, _record_usage],
     )
     wait_relay.upon(
         connection_lost,
@@ -589,11 +589,6 @@ class TransitServerState(object):
         enter=relaying,
         outputs=[_count_bytes, _send_to_partner],
     )
-    wait_partner.upon(
-        got_partner_translate,
-        enter=wait_handshake, # XXX split this too?? ug
-        outputs=[_mood_happy, _send_ok, _connect_partner],
-    )
     relaying.upon(
         connection_lost,
         enter=done,
@@ -603,7 +598,7 @@ class TransitServerState(object):
     wait_handshake.upon(
         got_bytes,
         enter=wait_handshake,
-        outputs=[_count_bytes, _buffer_bytes, _find_handshake],
+        outputs=[_buffer_bytes, _find_handshake],
     )
     wait_handshake.upon(
         got_message,
@@ -620,6 +615,11 @@ class TransitServerState(object):
         enter=wait_go_handshake,
         outputs=[_find_go_handshake],
     )
+    wait_handshake.upon(
+        connection_lost,
+        enter=done,
+        outputs=[_mood_happy_if_first, _unregister, _record_usage],
+    )
 
     wait_go_handshake.upon(
         got_go,
@@ -629,7 +629,7 @@ class TransitServerState(object):
     wait_go_handshake.upon(
         got_bytes,
         enter=wait_go_handshake,
-        outputs=[_count_bytes, _buffer_bytes, _find_go_handshake],
+        outputs=[_buffer_bytes, _find_go_handshake],
     )
     wait_go_handshake.upon(
         got_message,

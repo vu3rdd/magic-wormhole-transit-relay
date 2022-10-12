@@ -1,4 +1,4 @@
-from binascii import hexlify
+from binascii import hexlify, unhexlify
 from twisted.trial import unittest
 from twisted.test import iosim
 from autobahn.twisted.websocket import (
@@ -94,6 +94,13 @@ def _paired_clients(testcase, token, side1=None, side2=None):
     p2.reset_received_data()
     return p1, p2
 
+
+def _prefix_data(data):
+    """
+    Put on a 4-byte length prefix for the given data
+    """
+    length = unhexlify("%08x" % len(data))
+    return length + data
 
 
 class _Transit:
@@ -192,30 +199,15 @@ class _Transit:
         self.flush()
 
     def test_unsided_sided(self):
-        p1 = self.new_protocol()
-        p2 = self.new_protocol()
-
         token1 = b"\x00"*32
         side1 = b"\x01"*8
-        p1.send(handshake(token1))
-        p2.send(handshake(token1, side=side1))
-        self.flush()
-        p1.send(transit_handshake(token1, "sender"))
-        p2.send(transit_handshake(token1, "receiver"))
-        p1.send(b"go\n")
-        self.flush()
-
-        # a correct handshake yields an ack, after which we can send
-        self.assertEqual(p1.get_received_data(), b"ok\n" + transit_handshake(token1, "receiver"))
-        self.assertEqual(p2.get_received_data(), b"ok\n" + transit_handshake(token1, "sender") + b"go\n")
-
-        p1.reset_received_data()
-        p2.reset_received_data()
+        p1, p2 = _paired_clients(self, token1, side1)
 
         # all data they sent after the handshake should be given to us
-        s1 = b"data1"
+        s1 = _prefix_data(b"data1")
         p1.send(s1)
         self.flush()
+        print(p2.get_received_data())
         self.assertEqual(p2.get_received_data(), s1)
 
         p1.disconnect()
