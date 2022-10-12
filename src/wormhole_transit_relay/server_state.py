@@ -351,7 +351,6 @@ class TransitServerState(object):
 
     @_machine.output()
     def _find_handshake(self, data):
-        print("find_handshake", self._last_buffer)
         idx = self._last_buffer.find(b"\n\n")
         # XXX do seach for sender/receiver -- only if we're the SENDER
         # do we need to wait for the go; otherwise, straight to
@@ -373,7 +372,6 @@ class TransitServerState(object):
 
     @_machine.output()
     def _find_go_handshake(self, data):
-        print("find_go_handshake", self._last_buffer)
         idx = self._last_buffer.find(b"\n")
         if idx > 0:
             msg = self._last_buffer[:idx+1]
