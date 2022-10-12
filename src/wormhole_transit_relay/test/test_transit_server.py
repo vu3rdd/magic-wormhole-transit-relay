@@ -437,6 +437,7 @@ class TransitWebSockets(_Transit, ServerBase, unittest.TestCase):
         """
         One client is WebSocket and one is TCP
         """
+        # p1 is the "sender", p2 is "receiver" role
         p1 = self.new_protocol_ws()
         p2 = self.new_protocol_tcp()
 
@@ -456,11 +457,28 @@ class TransitWebSockets(_Transit, ServerBase, unittest.TestCase):
         p1.reset_received_data()
         p2.reset_received_data()
 
+        # fake the "second" handshake about the translate for now
+        # XXX -> probably want this more generally in "all" the tests?
+        sender_msg = "transit sender {} ready\n\n".format("1"*64).encode("utf8")
+        p1.send(sender_msg)
+        p2.send("transit receiver {} ready\n\n".format("1"*64).encode("utf8"))
+        self.flush()
+        p1.send(b"go\n")
+        self.flush()
+        self.assertEqual(p2.get_received_data(), sender_msg + b"go\n")
+
+        # _now_ we're ready to really relay
+
+        p1.reset_received_data()
+        p2.reset_received_data()
+
         # all data they sent after the handshake should be given to us
         s1 = b"data1"
         p1.send(s1)
         self.flush()
-        self.assertEqual(p2.get_received_data(), s1)
+
+        # we are the TCP receiver so we _should_ see length prefix
+        self.assertEqual(p2.get_received_data(), b'\x00\x00\x00\x05' + s1)
 
         p1.disconnect()
         p2.disconnect()
