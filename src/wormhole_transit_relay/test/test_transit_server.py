@@ -169,11 +169,14 @@ class _Transit:
         p1.send(handshake(token1, side=None))
         p2.send(handshake(token1, side=side1))
         self.flush()
+        p1.send(transit_handshake(token1, "sender"))
+        p2.send(transit_handshake(token1, "receiver"))
+        p1.send(b"go\n")
+        self.flush()
 
         # a correct handshake yields an ack, after which we can send
-        exp = b"ok\n"
-        self.assertEqual(p1.get_received_data(), exp)
-        self.assertEqual(p2.get_received_data(), exp)
+        self.assertEqual(p1.get_received_data(), b"ok\n" + transit_handshake(token1, "receiver"))
+        self.assertEqual(p2.get_received_data(), b"ok\n" + transit_handshake(token1, "sender") + b"go\n")
 
         p1.reset_received_data()
         p2.reset_received_data()
@@ -533,6 +536,13 @@ class TransitWebSockets(_Transit, ServerBase, unittest.TestCase):
         p1.send(handshake(token))
         p2.send(handshake(token))
         self.flush()
+        p1.send(transit_handshake(token, "sender"))
+        p2.send(transit_handshake(token, "receiver"))
+        p1.send(b"go\n")
+        self.flush()
+
+        # XXX need a test like this but _without_ the proper setup,
+        # too
 
         # p2 loses connection, then p1 sends a message
         p2.transport.loseConnection()
