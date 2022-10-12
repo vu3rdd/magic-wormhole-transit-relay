@@ -9,6 +9,14 @@ from zope.interface import (
     Attribute,
 )
 
+# there are "relay handshake" and the actual app handshake
+# - "please relay {64} for side {16}\n\n"
+# - "transit receiver {64} ready\n\n"
+# - "transit sender {64} ready\n\n"
+# ... biggest is 105
+MAX_HANDSHAKE_BUFFER = 128
+
+
 class ITransitClient(Interface):
     """
     Represents the client side of a connection to this transit
@@ -174,7 +182,7 @@ class TransitServerState(object):
     _total_sent = 0
     _client_type = "" # "tcp" or "websocket"
     _packet_count = 0
-    _last_buffer = bytes([])
+    _last_buffer = bytes([])  # XXX buffer, probably
 
     def __init__(self, pending_requests, usage_recorder):
         self._pending_requests = pending_requests
@@ -282,6 +290,12 @@ class TransitServerState(object):
         We saw the 'go\n' message from the other side
         """
 
+    @_machine.input()
+    def buffer_too_big(self):
+        """
+        Buffered too much data waiting for handshakes
+        """
+
     @_machine.output()
     def _remember_client(self, client):
         self._client = client
@@ -333,6 +347,11 @@ class TransitServerState(object):
     @_machine.output()
     def _buffer_message_bytes(self, data):
         self._last_buffer += data
+
+    @_machine.output()
+    def _check_buffer_too_big(self, data):
+        if len(self._last_buffer) > MAX_HANDSHAKE_BUFFER:
+            self.buffer_too_big()
 
     @_machine.output()
     def _buffer_message_add_prefix(self, data):
@@ -598,12 +617,17 @@ class TransitServerState(object):
     wait_handshake.upon(
         got_bytes,
         enter=wait_handshake,
-        outputs=[_buffer_bytes, _find_handshake],
+        outputs=[_buffer_bytes, _find_handshake, _check_buffer_too_big],
     )
     wait_handshake.upon(
         got_message,
         enter=wait_handshake,
-        outputs=[_buffer_message_bytes, _find_handshake],
+        outputs=[_buffer_message_bytes, _find_handshake, _check_buffer_too_big],
+    )
+    wait_handshake.upon(
+        buffer_too_big,
+        enter=done,
+        outputs=[_mood_errory, _disconnect, _disconnect_partner, _unregister, _record_usage],
     )
     wait_handshake.upon(
         got_handshake_receiver,
@@ -623,18 +647,28 @@ class TransitServerState(object):
 
     wait_go_handshake.upon(
         got_go,
-        enter=translating,  # XXX no way to get to 'relaying' ...
+        enter=translating,
         outputs=[_maybe_send_to_partner],
     )
     wait_go_handshake.upon(
         got_bytes,
         enter=wait_go_handshake,
-        outputs=[_buffer_bytes, _find_go_handshake],
+        outputs=[_buffer_bytes, _find_go_handshake, _check_buffer_too_big],
     )
     wait_go_handshake.upon(
         got_message,
         enter=wait_go_handshake,
-        outputs=[_buffer_message_bytes, _find_go_handshake],
+        outputs=[_buffer_message_bytes, _find_go_handshake, _check_buffer_too_big],
+    )
+    wait_go_handshake.upon(
+        buffer_too_big,
+        enter=done,
+        outputs=[_mood_errory, _disconnect, _disconnect_partner, _unregister, _record_usage],
+    )
+    wait_go_handshake.upon(
+        connection_lost,
+        enter=done,
+        outputs=[_mood_errory, _disconnect_partner, _unregister, _record_usage],
     )
 
     translating.upon(
