@@ -655,9 +655,8 @@ class TransitServerState(object):
     translating.upon(
         got_message,
         enter=translating,
-        outputs=[_buffer_message_add_prefix, _maybe_send_to_partner],
+        outputs=[_count_bytes, _buffer_message_add_prefix, _maybe_send_to_partner],
     )
-
     translating.upon(
         connection_lost,
         enter=done,
