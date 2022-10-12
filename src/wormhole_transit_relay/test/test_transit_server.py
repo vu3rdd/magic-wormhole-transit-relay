@@ -64,6 +64,38 @@ def transit_handshake(key, role):
     ).encode("utf8")
 
 
+def _paired_clients(testcase, token, side1=None, side2=None):
+    """
+    Produce two client protocols and successfully pair then, getting
+    to the 'ready for bulk data transfer' stage.
+    """
+    p1 = testcase.new_protocol()
+    p2 = testcase.new_protocol()
+    p1.send(handshake(token, side=side1))
+    testcase.flush()
+    p2.send(handshake(token, side=side2))
+    testcase.flush()
+    p1.send(transit_handshake(token, "sender"))
+    p2.send(transit_handshake(token, "receiver"))
+    p1.send(b"go\n")
+    testcase.flush()
+
+    # a correct handshake yields an ack, after which we can send
+    testcase.assertEqual(
+        p1.get_received_data(),
+        b"ok\n" + transit_handshake(token, "receiver")
+    )
+    testcase.assertEqual(
+        p2.get_received_data(),
+        b"ok\n" + transit_handshake(token, "sender") + b"go\n"
+    )
+
+    p1.reset_received_data()
+    p2.reset_received_data()
+    return p1, p2
+
+
+
 class _Transit:
     def count(self):
         return sum([
@@ -606,16 +638,10 @@ class Usage(ServerBase, unittest.TestCase):
         self.assertIdentical(self._usage.events[0]["waiting_time"], None)
 
     def test_one_happy_one_jilted(self):
-        p1 = self.new_protocol()
-        p2 = self.new_protocol()
-
         token1 = b"\x00"*32
         side1 = b"\x01"*8
         side2 = b"\x02"*8
-        p1.send(handshake(token1, side=side1))
-        self.flush()
-        p2.send(handshake(token1, side=side2))
-        self.flush()
+        p1, p2 = _paired_clients(self, token1, side1, side2)
 
         self.assertEqual(self._usage.events, []) # no events yet
 
